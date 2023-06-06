@@ -1,0 +1,193 @@
+---
+title: "Spatial final"
+author: "Anja Meerwald"
+date: "6/2/2023"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+
+```{r, include = FALSE}
+install.packages("tidycensus")
+install.packages("pacman")
+pacman::p_load(leaflet)
+```
+
+```{r, include = FALSE}
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(tigris)
+
+```
+
+
+
+```{r}
+census_api_key("YOUR API KEY HERE")
+```
+
+## Mapping income by county 
+
+```{r}
+# getting census county level median income data for Minnesota
+mn_income_county <- get_acs(
+  geography = "county",
+  variables = "B19013_001",
+  state = "MN",
+  geometry = TRUE,
+  survey = "acs5",
+  year = 2019
+)
+
+
+# Calculate median income by county
+mn_income_county <- mn_income_county %>%
+  mutate(median_income = estimate) %>%
+  select(GEOID, NAME, median_income)
+
+# Plotting the map
+mn_income_map <- ggplot() +
+  geom_sf(data = mn_income_county, aes(fill = median_income)) +
+  scale_fill_viridis_c(option = "magma", name = "Median Income") +
+  theme_void() +
+  theme(legend.position = "right") +
+  labs(title = "Median Income by County in Minnesota")
+mn_income_map
+
+# saving the figure 
+ggsave("mn_income_map.png", mn_income_map, width = 6, height = 4, units = "in", dpi = 300)
+```
+
+## Mapping income by school district 
+
+```{r}
+
+# get the school district boundaries for Minnesota 
+mn_school_districts <- school_districts(state = "MN", cb = TRUE)
+
+# spatial join school districts with counties
+mn_income_district <- st_join(mn_school_districts, mn_income_county)
+
+# renaming the columns after spatial join
+mn_income_district <- mn_income_district %>%
+  rename(NAME = NAME.x)
+
+# plotting map
+school_income_map <- ggplot() +
+  geom_sf(data = mn_income_district, aes(fill = median_income)) +
+  scale_fill_viridis_c(option = "magma", name = "Median Income") +
+  theme_void() +
+  theme(legend.position = "right") +
+  labs(title = "Median Income by School District in Minnesota")
+school_income_map
+
+# saving the figure 
+ggsave("school_income_map.png", school_income_map, width = 6, height = 4, units = "in", dpi = 300)
+```
+
+## Interactive map of income by school district 
+
+```{r}
+# convert the sf layer to WGS84 datum
+mn_income_district <- st_transform(mn_income_district, "+proj=longlat +datum=WGS84")
+
+# making an interactive leaflet map
+interactive_school_income <- leaflet() %>%
+  addProviderTiles("Stamen.TonerLite") %>%
+  setView(lng = -93.2650, lat = 44.9778, zoom = 8) %>%
+  addPolygons(
+    data = mn_income_district,
+    fillColor = ~colorNumeric(palette = "Blues", domain = median_income)(median_income),
+    fillOpacity = 0.7,
+    color = "white",
+    weight = 1,
+    highlightOptions = highlightOptions(
+      color = "white",
+      weight = 2,
+      bringToFront = TRUE
+    ),
+    label = ~paste0(NAME, "<br>Median Income: $", median_income)
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    pal = colorNumeric(palette = "Blues", domain = mn_income_district$median_income),
+    values = mn_income_district$median_income,
+    title = "Median Income",
+    opacity = 0.7
+  )
+interactive_school_income
+```
+
+## Highest income school districts 
+
+```{r}
+# sort the school districts by median income in descending order
+sorted_districts <- mn_income_district %>%
+  arrange(desc(median_income))
+
+# picking the schools with the highest median income, top 12 all have the same 
+top_12_districts <- head(sorted_districts, 12)
+
+top_12_districts$NAME
+```
+
+
+## Spatial autocorrelation
+```{r}
+library(spdep)
+```
+
+```{r}
+
+# convert data to a spatial polygons df
+mn_income_district_sp <- as(mn_income_district, "Spatial")
+
+# make a neighbor list defining spatial relationships among districts
+nb <- poly2nb(mn_income_district_sp)
+
+# calculate spatial weights matrix
+W <- nb2listw(nb, style = "B")
+
+# calculate moran's statistic
+moran <- moran.test(mn_income_district$median_income, W)
+moran
+
+# calculate moran's statistic with monte carlo simulation
+moran_result <- moran.mc(x = mn_income_district$median_income, listw = W, nsim = 999)
+moran_result
+
+```
+
+
+# Getting all the info needed about the R and package versions 
+```{r}
+sessionInfo()
+```
+
+
+
+## citing the packages 
+
+```{r}
+citation("tidycensus")
+```
+
+```{r}
+citation("tigris")
+```
+
+```{r}
+citation("sf")
+```
+
+```{r}
+citation("leaflet")
+```
+
+```{r}
+citation("spdep")
+```
+
